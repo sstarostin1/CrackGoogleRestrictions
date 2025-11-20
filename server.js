@@ -82,6 +82,14 @@ app.post('/api/gemini-proxy-stream', async (req, res) => {
   }
 });
 
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    service: 'Gemini Proxy',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
 });
