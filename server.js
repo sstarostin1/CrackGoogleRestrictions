@@ -80,7 +80,7 @@ app.post('/api/gemini-proxy-stream', async (req, res) => {
       details: error.message 
     });
   }
-});
+}); 
 
 app.get('/healthz', (req, res) => {
   res.status(200).json({ 
