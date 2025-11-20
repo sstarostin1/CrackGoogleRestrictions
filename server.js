@@ -6,40 +6,68 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Проверка работы сервера
+// Основной маршрут
 app.get('/', (req, res) => {
   res.json({ message: 'Gemini Proxy Server is running!' });
 });
 
-// Основной прокси-эндпоинт
-app.post('/api/gemini-proxy', async (req, res) => {
+// Health check
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    service: 'Gemini Proxy',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Универсальный прокси для всех путей Gemini API
+app.all('/*', async (req, res) => {
   try {
-    const { model, contents, generationConfig } = req.body;
+    // Получаем оригинальный путь запроса
+    const originalPath = req.path;
     
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents,
-          generationConfig
-        })
-      }
-    );
+    // Определяем модель из пути
+    let model = "gemini-pro"; // модель по умолчанию
+    
+    // Парсим модель из URL (например: /v1beta/models/gemini-3-pro-preview:streamGenerateContent)
+    const modelMatch = originalPath.match(/models\/([^:]+)/);
+    if (modelMatch) {
+      model = modelMatch[1];
+    }
+    
+    // Определяем тип запроса
+    const isStream = originalPath.includes('streamGenerateContent');
+    
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${isStream ? 'streamGenerateContent' : 'generateContent'}?key=${process.env.GEMINI_API_KEY}`;
+
+    console.log(`Proxying to: ${geminiUrl}`);
+    
+    const response = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(req.body)
+    });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
     }
 
-    const data = await response.json();
-    res.json(data);
+    // Для потокового ответа
+    if (isStream) {
+      res.setHeader('Content-Type', 'application/json');
+      const data = await response.json();
+      res.json(data);
+    } else {
+      // Для обычного ответа
+      const data = await response.json();
+      res.json(data);
+    }
     
   } catch (error) {
     console.error('Proxy error:', error);
@@ -48,46 +76,6 @@ app.post('/api/gemini-proxy', async (req, res) => {
       details: error.message 
     });
   }
-});
-
-// Эндпоинт для потокового ответа (если нужно)
-app.post('/api/gemini-proxy-stream', async (req, res) => {
-  try {
-    const { model, contents } = req.body;
-    
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ contents })
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    res.json(data);
-    
-  } catch (error) {
-    console.error('Stream proxy error:', error);
-    res.status(500).json({ 
-      error: 'Stream proxy server error', 
-      details: error.message 
-    });
-  }
-}); 
-
-app.get('/healthz', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
-    service: 'Gemini Proxy',
-    timestamp: new Date().toISOString()
-  });
 });
 
 app.listen(PORT, () => {
